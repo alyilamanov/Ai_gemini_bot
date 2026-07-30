@@ -4,7 +4,7 @@ import logging
 from threading import Thread
 from flask import Flask
 import aiosqlite
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import CommandStart, Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from google import genai
@@ -104,6 +104,25 @@ async def get_users_count() -> int:
             row = await cursor.fetchone()
             return row[0] if row else 0
 
+async def ensure_user(user_id: int):
+    """Foydalanuvchi bazada bo'lmasa, uni default 'uz' tili bilan qo'shadi.
+    Mavjud bo'lsa, hech narsa o'zgartirmaydi (INSERT OR IGNORE)."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("INSERT OR IGNORE INTO users (user_id, lang) VALUES (?, 'uz')", (user_id,))
+        await db.commit()
+
+# Har bir kelgan update (xabar, callback va h.k.) uchun foydalanuvchini
+# avtomatik bazaga yozib qo'yadigan middleware. Shu tufayli statistika
+# faqat /start bosganlarni emas, hamma faol foydalanuvchilarni hisoblaydi.
+class UserTrackerMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        user = data.get("event_from_user")
+        if user is not None:
+            await ensure_user(user.id)
+        return await handler(event, data)
+
+dp.update.outer_middleware(UserTrackerMiddleware())
+
 # --- 5. Klaviaturalar ---
 def get_lang_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -150,18 +169,26 @@ async def generate_image_cmd(message: types.Message):
     status_msg = await message.answer(TEXTS[lang]['gen_image'])
     
     try:
-        result = ai_client.models.generate_images(
-            model='imagen-3.0-generate-002',
-            prompt=prompt,
-            config=dict(number_of_images=1, output_mime_type="image/jpeg")
+        # Imagen (generate_images) ko'pincha faqat to'lovli loyihalarda ishlaydi.
+        # Shuning uchun Gemini'ning o'z rasm-generatsiya modelidan (Nano Banana)
+        # generate_content orqali foydalanamiz — bepul kalitda ham ishlashi ehtimoli yuqoriroq.
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash-image',
+            contents=prompt
         )
-        
-        for generated_image in result.generated_images:
-            image_bytes = generated_image.image.image_bytes
-            photo = BufferedInputFile(image_bytes, filename="ai_photo.jpg")
-            await message.answer_photo(photo, caption=f"🎨 **Prompt:** {prompt}", parse_mode="Markdown")
-            
-        await status_msg.delete()
+
+        image_sent = False
+        for part in response.candidates[0].content.parts:
+            if getattr(part, "inline_data", None) is not None:
+                image_bytes = part.inline_data.data
+                photo = BufferedInputFile(image_bytes, filename="ai_photo.jpg")
+                await message.answer_photo(photo, caption=f"🎨 Prompt: {prompt}")
+                image_sent = True
+
+        if not image_sent:
+            await status_msg.edit_text(TEXTS[lang]['error'])
+        else:
+            await status_msg.delete()
     except Exception as e:
         logging.error(f"Image error: {e}")
         await status_msg.edit_text(TEXTS[lang]['error'])
