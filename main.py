@@ -166,7 +166,7 @@ async def generate_image_cmd(message: types.Message):
         logging.error(f"Image error: {e}")
         await status_msg.edit_text(TEXTS[lang]['error'])
 
-# Matn Javobi (Gemini 1.5 Flash ga to'g'rilangan)
+# Matn Javobi (Gemini flash-latest ga to'g'rilangan)
 @dp.message(F.text)
 async def ai_text_reply(message: types.Message):
     await bot.send_chat_action(chat_id=message.chat.id, action="typing")
@@ -176,7 +176,7 @@ async def ai_text_reply(message: types.Message):
 
     try:
         response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-flash-latest',
             contents=prompt
         )
         
@@ -191,7 +191,7 @@ async def ai_text_reply(message: types.Message):
         logging.error(f"Text AI error: {e}")
         await message.answer(TEXTS[lang]['error'])
 
-# Media Handlers (Gemini 1.5 Flash ga to'g'rilangan)
+# Media Handlers (Gemini flash-latest ga to'g'rilangan)
 @dp.message(F.photo | F.document | F.voice | F.audio)
 async def media_handler(message: types.Message):
     await bot.send_chat_action(chat_id=message.chat.id, action="typing")
@@ -218,7 +218,7 @@ async def media_handler(message: types.Message):
         caption = message.caption if message.caption else "Ushbu faylni tushuntirib bering."
 
         response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-flash-latest',
             contents=[
                 {"mime_type": mime_type, "data": file_bytes.read()},
                 f"Respond in language code {lang}. Query: {caption}"
