@@ -8,11 +8,10 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from google import genai
-from google.genai import types as genai_types
 
 logging.basicConfig(level=logging.INFO)
 
-# --- 1. UptimeRobot uchun Web Server ---
+# --- 1. Web Server ---
 app = Flask('')
 
 @app.route('/')
@@ -29,7 +28,7 @@ def keep_alive():
 # --- 2. Konfiguratsiya ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # O'zingizning Telegram ID'ingizni yozasiz
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -37,7 +36,7 @@ ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 DB_NAME = "bot_data.db"
 
-# --- 3. Ko'p tillilik Lug'ati (Localization) ---
+# --- 3. Ko'p tillilik Lug'ati ---
 TEXTS = {
     'uz': {
         'welcome': "👋 <b>Assalomu alaykum!</b>\n\nMen eng kuchli AI yordamchisiman. Matn, rasm, fayl, audio yuborishingiz yoki rasm chizdirishingiz mumkin!",
@@ -77,7 +76,7 @@ TEXTS = {
     }
 }
 
-# --- 4. Database Bilan Ishlash ---
+# --- 4. Database ---
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
@@ -112,12 +111,11 @@ def get_lang_keyboard():
         [InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en"), InlineKeyboardButton(text="🇹🇲 Türkmençe", callback_data="lang_tk")]
     ])
 
-# --- 6. Handlers (Buyruqlar va xabarlar) ---
+# --- 6. Handlers ---
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     lang = await get_user_lang(message.from_user.id)
     await set_user_lang(message.from_user.id, lang)
-    
     txt = TEXTS[lang]
     await message.answer(f"{txt['welcome']}\n\n{txt['select_lang']}", parse_mode="HTML", reply_markup=get_lang_keyboard())
 
@@ -132,7 +130,6 @@ async def set_lang_callback(call: types.CallbackQuery):
     await set_user_lang(call.from_user.id, lang_code)
     await call.message.edit_text(TEXTS[lang_code]['lang_changed'])
 
-# Admin va Statistika
 @dp.message(Command("admin"))
 @dp.message(Command("stat"))
 async def admin_cmd(message: types.Message):
@@ -140,7 +137,7 @@ async def admin_cmd(message: types.Message):
     count = await get_users_count()
     await message.answer(TEXTS[lang]['stat'].format(users=count), parse_mode="HTML")
 
-# AI Rasm Yaratish (Imagen 3)
+# AI Rasm Yaratish
 @dp.message(Command("image"))
 async def generate_image_cmd(message: types.Message):
     lang = await get_user_lang(message.from_user.id)
@@ -169,24 +166,18 @@ async def generate_image_cmd(message: types.Message):
         logging.error(f"Image error: {e}")
         await status_msg.edit_text(TEXTS[lang]['error'])
 
-# Umumiy Matn va Internet Qidiruvi (Google Search grounding)
-# Umumiy Matn va Internet Qidiruvi (Google Search grounding)
+# Matn Javobi
 @dp.message(F.text)
 async def ai_text_reply(message: types.Message):
     await bot.send_chat_action(chat_id=message.chat.id, action="typing")
     lang = await get_user_lang(message.from_user.id)
 
-    system_prompt = f"You are a helpful AI assistant. Always respond in the user's selected language code: {lang}."
+    prompt = f"System Instruction: Respond in language code '{lang}'. User Message: {message.text}"
 
     try:
-        # Gemini 2.5 Google Search Grounding to'g'ri sintaksisda
         response = ai_client.models.generate_content(
             model='gemini-2.5-flash',
-            contents=message.text,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())]
-            )
+            contents=prompt
         )
         
         reply = response.text
@@ -200,15 +191,13 @@ async def ai_text_reply(message: types.Message):
         logging.error(f"Text AI error: {e}")
         await message.answer(TEXTS[lang]['error'])
 
-
-# Media (Rasm, Hujjat va Audio) qayta ishlash
+# Media Handlers
 @dp.message(F.photo | F.document | F.voice | F.audio)
 async def media_handler(message: types.Message):
     await bot.send_chat_action(chat_id=message.chat.id, action="typing")
     lang = await get_user_lang(message.from_user.id)
 
     try:
-        # Faylni xotiraga yuklab olish
         file_id = None
         mime_type = "image/jpeg"
 
@@ -226,13 +215,13 @@ async def media_handler(message: types.Message):
         file_info = await bot.get_file(file_id)
         file_bytes = await bot.download_file(file_info.file_path)
 
-        caption = message.caption if message.caption else "Ushbu faylni tushuntirib va tahlil qilib ber."
+        caption = message.caption if message.caption else "Ushbu faylni tushuntirib bering."
 
         response = ai_client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[
-                genai_types.Part.from_bytes(data=file_bytes.read(), mime_type=mime_type),
-                f"Respond in language {lang}. Query: {caption}"
+                {"mime_type": mime_type, "data": file_bytes.read()},
+                f"Respond in language code {lang}. Query: {caption}"
             ]
         )
         await message.answer(response.text)
