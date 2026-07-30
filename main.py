@@ -170,21 +170,22 @@ async def generate_image_cmd(message: types.Message):
         await status_msg.edit_text(TEXTS[lang]['error'])
 
 # Umumiy Matn va Internet Qidiruvi (Google Search grounding)
+# Umumiy Matn va Internet Qidiruvi (Google Search grounding)
 @dp.message(F.text)
 async def ai_text_reply(message: types.Message):
     await bot.send_chat_action(chat_id=message.chat.id, action="typing")
     lang = await get_user_lang(message.from_user.id)
 
-    system_prompt = f"You are a helpful AI assistant. Always respond in the user's selected language: {lang}."
+    system_prompt = f"You are a helpful AI assistant. Always respond in the user's selected language code: {lang}."
 
     try:
-        # Gemini 2.5 Google Search Grounding bilan ulangan
+        # Gemini 2.5 Google Search Grounding to'g'ri sintaksisda
         response = ai_client.models.generate_content(
             model='gemini-2.5-flash',
             contents=message.text,
             config=genai_types.GenerateContentConfig(
                 system_instruction=system_prompt,
-                tools=[{"google_search": {}}] # Internetdan qidiruv
+                tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())]
             )
         )
         
@@ -198,6 +199,7 @@ async def ai_text_reply(message: types.Message):
     except Exception as e:
         logging.error(f"Text AI error: {e}")
         await message.answer(TEXTS[lang]['error'])
+
 
 # Media (Rasm, Hujjat va Audio) qayta ishlash
 @dp.message(F.photo | F.document | F.voice | F.audio)
